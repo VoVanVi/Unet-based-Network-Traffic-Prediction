@@ -55,7 +55,7 @@ class Config:
     lr = 1e-3
 
     # ---------- Device ----------
-    device = "cpu" # "cuda" or "cpu"
+    device = "cuda" # "cuda" or "cpu"
 
     # ---------- Directories ----------
     checkpoint_dir = "checkpoints"
@@ -82,4 +82,5 @@ cfg.image_tag = (
 # Use the tag in all important artifact filenames
 os.makedirs(cfg.checkpoint_dir, exist_ok=True)
 cfg.model_ckpt = os.path.join(cfg.checkpoint_dir, f"{cfg.model_type}_best_{cfg.image_tag}.pt")
+
 cfg.scaler_path = os.path.join(cfg.checkpoint_dir, f"scaler_{cfg.model_type}_{cfg.image_tag}.pkl")
