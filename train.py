@@ -85,11 +85,12 @@ def main():
     for epoch in range(1, cfg.num_epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
         val_loss = evaluate(model, val_loader, criterion, device)
-        test_loss = evaluate(model, test_loader, criterion, device)
+        # test_loss = evaluate(model, test_loader, criterion, device)
 
         print(
             f"Epoch [{epoch}/{cfg.num_epochs}] "
-            f"Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f} | Test Loss: {test_loss:.6f}"
+            f"Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f}"
+            # f"Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f} | Test Loss: {test_loss:.6f}"
         )
 
         if val_loss < best_val_loss:

@@ -10,6 +10,9 @@ from models.unet2d import UNet
 
 from visualize_results import (
     visualize_sample_images,
+    visualize_test_windows_sec_original,
+    visualize_test_windows_sec_normalized,
+    # visualize_test_windows_sec,
     visualize_all_test_traffic,
     visualize_all_test_traffic_normalized,
     visualize_full_dataset_traffic,
@@ -134,9 +137,9 @@ def main():
     print(f"\nTest MAE (normalized): {mae:.6f}")
     print(f"Test MSE (normalized): {mse:.6f}")
 
-    print("\nVisualizing some sample images...")
-    visualize_sample_images(model, test_loader, device, scaler, num_samples=20)
-    # print("\nVisualizing good test samples (best MAE+MSE)...")
+
+    # print("\nVisualizing some sample images...")
+    # visualize_sample_images(model, test_loader, device, scaler, num_samples=20)
     # visualize_sample_images(
     #     model,
     #     test_loader,
@@ -146,10 +149,30 @@ def main():
     #     selection="random",  # or "worst" / "random"
     #     test_idx=test_idx,
     # )
+    #
+    print("\nVisualizing TEST prediction windows in seconds...")
+    visualize_test_windows_sec_original(
+        model, test_loader, test_idx, device, scaler,
+        seq_len=5, num_windows=5
+    )
+
+    visualize_test_windows_sec_normalized(
+        model, test_loader, test_idx, device,
+        seq_len=5, num_windows=5
+    )
+    # visualize_test_windows_sec(
+    #     model,
+    #     test_loader=test_loader,
+    #     test_idx=test_idx,
+    #     device=device,
+    #     scaler=scaler,
+    #     seq_len=cfg.context_len,  # your sequence length
+    #     num_windows=3,  # how many windows to plot
+    # )
 
     print("\nVisualizing traffic of the whole dataset (normalized or original)...")
-    visualize_all_test_traffic_normalized(model, test_loader, test_idx, device)
-    # visualize_all_test_traffic(model, test_loader, test_idx, device, scaler)
+    # visualize_all_test_traffic_normalized(model, test_loader, test_idx, device)
+    visualize_all_test_traffic(model, test_loader, test_idx, device, scaler)
 
     # print("\nVisualizing traffic over WHOLE dataset (normalized)...")
     # visualize_full_dataset_traffic(model, train_eval_loader, val_eval_loader, test_loader, train_idx, val_idx, test_idx, device, scaler)

@@ -270,7 +270,7 @@ def generate_and_save_dataset():
     # X_test, Y_test = X_seq[test_seq_ids], Y_seq[test_seq_ids]
 
     # After X_train, Y_train, train_idx are computed
-    debug_sample_windows(values_norm, X, Y, train_idx, num_samples=2)
+    # debug_sample_windows(values_norm, X, Y, train_idx, num_samples=2)
 
     # Save dataset arrays + meta
     np.savez_compressed(

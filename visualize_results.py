@@ -53,8 +53,8 @@ def visualize_sample_images(
     device,
     scaler,
     num_samples: int = 3,
-    selection: str = "best",          # "best", "worst", or "random"
-    test_idx: Optional[np.ndarray] = None,   # global window indices for test set
+    selection: str = "best",                # "best", "worst", or "random"
+    test_idx: Optional[np.ndarray] = None,  # global window indices for test set
 ):
     """
     Select test samples based on prediction quality (MAE + MSE) and visualize them.
@@ -67,7 +67,7 @@ def visualize_sample_images(
          - "worst": largest combined rank
          - "random": random subset
       4) For each selected sample:
-         - show GT, Pred, |Error| (normalized) as images
+         - show GT, Pred, |Error| (normalized) as images (same color scale + 1 colorbar)
          - show GT vs Pred as 1D curve in ORIGINAL scale
          - if test_idx is provided, also show global window id + horizon raw indices.
     """
@@ -77,7 +77,7 @@ def visualize_sample_images(
     preds_test, gts_test = _run_inference(model, test_loader, device)
     N, C, H, W = preds_test.shape
 
-    # 2) Per-sample MAE and MSE
+    # 2) Per-sample MAE and MSE (normalized)
     diff = preds_test - gts_test                     # (N, C, H, W)
     abs_diff = np.abs(diff)
     sq_diff = diff ** 2
@@ -88,7 +88,6 @@ def visualize_sample_images(
     # 3) Build ordering according to selection
     selection = selection.lower()
     if selection in ("best", "worst"):
-        # Rank (0 = best/smallest) for each metric
         mae_rank = np.argsort(np.argsort(mae_per_sample))
         mse_rank = np.argsort(np.argsort(mse_per_sample))
         combined_rank = mae_rank + mse_rank  # “good” if both small
@@ -158,42 +157,65 @@ def visualize_sample_images(
 
         # ---- Figure with 2 rows: images + time series ----
         fig = plt.figure(figsize=(12, 6))
-        gs  = gridspec.GridSpec(2, 3, height_ratios=[2, 1])
 
+        # 2 rows, 4 columns:
+        # row 0: [GT, Pred, Error, Colorbar]
+        # row 1: [time series spanning all 4 cols]
+        gs = gridspec.GridSpec(
+            2, 4,
+            width_ratios=[1, 1, 1, 0.05],
+            height_ratios=[2, 1],
+            wspace=0.3,
+            hspace=0.4,
+            figure=fig,   # <-- attach GridSpec to figure (no layout warning)
+        )
+
+        # --- Title text ---
         title_lines = [
             f"Test sample (selection rank {rank}) – {cfg.image_tag}",
-            f"Selection mode: {selection}",
-            f"MAE = {sample_mae:.6f}, MSE = {sample_mse:.6f}",
             f"Horizon length: {T} steps = {T * cfg.sample_interval_sec / 60:.1f} min",
         ]
-        if global_win_id is not None and horizon_start_raw is not None:
-            title_lines.append(
-                f"Global window id = {global_win_id}, "
-                f"horizon raw idx [{horizon_start_raw} .. {horizon_end_raw}]"
-            )
+
+        # title_lines = [
+        #     f"Test sample (selection rank {rank}) – {cfg.image_tag}",
+        #     f"Selection mode: {selection}",
+        #     f"MAE = {sample_mae:.6f}, MSE = {sample_mse:.6f}",
+        #     f"Horizon length: {T} steps = {T * cfg.sample_interval_sec / 60:.1f} min",
+        # ]
+        # if global_win_id is not None and horizon_start_raw is not None:
+        #     title_lines.append(
+        #         f"Global window id = {global_win_id}, "
+        #         f"horizon raw idx [{horizon_start_raw} .. {horizon_end_raw}]"
+        #     )
 
         fig.suptitle("\n".join(title_lines), fontsize=10)
 
-        # Row 0: images (normalized)
+        # --- shared color scale across 3 images ---
+        vmin = min(gt_img_norm.min(), pred_img_norm.min(), err_img_norm.min())
+        vmax = max(gt_img_norm.max(), pred_img_norm.max(), err_img_norm.max())
+
+        # ---- Row 0: images + shared colorbar ----
         ax1 = fig.add_subplot(gs[0, 0])
-        im1 = ax1.imshow(gt_img_norm, aspect="auto")
-        ax1.set_title("Ground Truth (normalized)")
+        im = ax1.imshow(gt_img_norm, aspect="auto", vmin=vmin, vmax=vmax)
+        ax1.set_title("Ground Truth (norm)")
         ax1.axis("off")
-        fig.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
 
         ax2 = fig.add_subplot(gs[0, 1])
-        im2 = ax2.imshow(pred_img_norm, aspect="auto")
-        ax2.set_title("Predictions (normalized)")
+        ax2.imshow(pred_img_norm, aspect="auto", vmin=vmin, vmax=vmax)
+        ax2.set_title("Prediction (norm)")
         ax2.axis("off")
-        fig.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
 
         ax3 = fig.add_subplot(gs[0, 2])
-        im3 = ax3.imshow(err_img_norm, aspect="auto")
-        ax3.set_title("|Error| (normalized)")
+        ax3.imshow(err_img_norm, aspect="auto", vmin=vmin, vmax=vmax)
+        ax3.set_title("|Error| (norm)")
         ax3.axis("off")
-        fig.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
 
-        # Row 1: original-scale time series
+        # dedicated axis for shared colorbar
+        cax = fig.add_subplot(gs[0, 3])
+        cbar = fig.colorbar(im, cax=cax)
+        cbar.set_label("Normalized value", fontsize=9)
+
+        # ---- Row 1: original-scale time series (span all columns) ----
         ax4 = fig.add_subplot(gs[1, :])
         ax4.plot(time_axis_min, gt_flat_orig, label="Ground Truth", linewidth=2)
         ax4.plot(
@@ -210,6 +232,7 @@ def visualize_sample_images(
         ax4.grid(True)
         ax4.legend()
 
+        # leave some room for suptitle
         fig.tight_layout(rect=[0, 0.03, 1, 0.92])
 
         # filename encodes selection + sample index + MAE+MSE + optional global id
@@ -229,106 +252,6 @@ def visualize_sample_images(
 
         print(f"Saved sample visualization to {out_path}")
 
-
-# def visualize_sample_images(
-#     model,
-#     test_loader,
-#     device,
-#     scaler,
-#     num_samples=3,
-# ):
-#     """
-#     For a few test samples, visualize:
-#       - GT, Pred, |Error| as images (normalized)
-#       - GT vs Pred as 1D curve in ORIGINAL scale
-#
-#     Saves files with cfg.image_tag in the name.
-#     """
-#     os.makedirs(cfg.results_dir, exist_ok=True)
-#     model.eval()
-#
-#     batch = next(iter(test_loader))
-#     X, Y = batch
-#     X = X.to(device)
-#     Y = Y.to(device)
-#
-#     with torch.no_grad():
-#         pred = model(X)
-#
-#     pred_np = pred.cpu().numpy()  # (B, C, H, W)
-#     Y_np = Y.cpu().numpy()
-#
-#     B, C, H, W = pred_np.shape
-#     n_plot = min(num_samples, B)
-#
-#     for k in range(n_plot):
-#         pred_img_norm = pred_np[k, 0]  # (H, W)
-#         gt_img_norm = Y_np[k, 0]
-#
-#         # Flatten and inverse transform to original scale
-#         pred_flat_norm = pred_img_norm.reshape(-1, 1)
-#         gt_flat_norm = gt_img_norm.reshape(-1, 1)
-#
-#         pred_flat_orig = scaler.inverse_transform(pred_flat_norm).flatten()
-#         gt_flat_orig = scaler.inverse_transform(gt_flat_norm).flatten()
-#
-#         T = pred_flat_orig.shape[0]
-#         time_axis_sec = np.arange(T) * cfg.sample_interval_sec
-#         time_axis_min = time_axis_sec / 60.0
-#
-#         err_img_norm = np.abs(pred_img_norm - gt_img_norm)
-#
-#         # ---- Figure with 2 rows: images + time series ----
-#         fig = plt.figure(figsize=(12, 6))
-#         gs = gridspec.GridSpec(2, 3, height_ratios=[2, 1])
-#
-#         fig.suptitle(
-#             f"Test sample #{k} – {cfg.image_tag}\n"
-#             f"Horizon length: {T} steps = {T * cfg.sample_interval_sec / 60:.1f} min",
-#             fontsize=10,
-#         )
-#
-#         # Row 0: images (normalized)
-#         ax1 = fig.add_subplot(gs[0, 0])
-#         im1 = ax1.imshow(gt_img_norm, aspect="auto")
-#         ax1.set_title("Ground Truth (normalized)")
-#         ax1.axis("off")
-#         fig.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
-#
-#         ax2 = fig.add_subplot(gs[0, 1])
-#         im2 = ax2.imshow(pred_img_norm, aspect="auto")
-#         ax2.set_title("Predictions (normalized)")
-#         ax2.axis("off")
-#         fig.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
-#
-#         ax3 = fig.add_subplot(gs[0, 2])
-#         im3 = ax3.imshow(err_img_norm, aspect="auto")
-#         ax3.set_title("|Error| (normalized)")
-#         ax3.axis("off")
-#         fig.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
-#
-#         # Row 1: original-scale time series
-#         ax4 = fig.add_subplot(gs[1, :])
-#         ax4.plot(time_axis_min, gt_flat_orig, label="Ground Truth", linewidth=2)
-#         ax4.plot(time_axis_min, pred_flat_orig, label="Predictions", linestyle="--", linewidth=1.5,)
-#         ax4.set_xlabel(
-#             f"Time within horizon (minutes, Δt = {cfg.sample_interval_sec}s)"
-#         )
-#         ax4.set_ylabel("Traffic volume (original)")
-#         ax4.grid(True)
-#         ax4.legend()
-#
-#         fig.tight_layout(rect=[0, 0.03, 1, 0.92])
-#
-#         out_path = os.path.join(
-#             cfg.visualized_dir,
-#             f"sample_{k}_{cfg.image_tag}.png",
-#         )
-#         fig.savefig(out_path, dpi=150)
-#         plt.show()
-#         plt.close(fig)
-#
-#         print(f"Saved sample visualization to {out_path}")
 
 
 # =========================================================
@@ -393,7 +316,7 @@ def visualize_all_test_traffic(model, test_loader, test_idx, device, scaler):
 
     plt.figure(figsize=(12, 4))
     plt.plot(time_axis_min, gt_orig, label="Ground Truth", linewidth=1)
-    plt.plot( time_axis_min, pred_orig, label="Predictions", linewidth=1, linestyle="--", alpha=0.8,)
+    plt.plot(time_axis_min, pred_orig, label="Predictions", linewidth=1, linestyle="--", alpha=0.8,)
     plt.xlabel(f"Time from dataset start (minutes, Δt = {cfg.sample_interval_sec}s)")
     plt.ylabel("Traffic volume")
     plt.title("Traffic over ALL TEST horizons (Ground Truth vs Predictions)")
@@ -485,10 +408,453 @@ def visualize_all_test_traffic_normalized(model, test_loader, test_idx, device):
     print(f"Saved test traffic visualization (normalized) to {out_path}")
 
 
+# ==========================================================
+# Visualize several TEST prediction windows (GT vs Pred)
+# in ORIGINAL scale with x-axis in SECONDS, starting from 0.
+# ==========================================================
+def visualize_test_windows_sec_original(
+    model,
+    test_loader,
+    test_idx,
+    device,
+    scaler,
+    seq_len: int = 5,
+    num_windows: int = 3,
+):
+    """
+    Visualize several TEST prediction windows (GT vs Pred) in ORIGINAL scale.
+    - x-axis: seconds starting from 0
+    - window length: (non-overlap horizon) * seq_len
+      where horizon_len = (H_out - overlap_rows) * W_out (in samples)
+    - y-axis: [0, max(GT, Pred)]
+    """
+    os.makedirs(cfg.visualized_dir, exist_ok=True)
+
+    # 1) Inference on TEST (normalized)
+    preds_test, gts_test = _run_inference(model, test_loader, device)
+    N_test, C, H_out, W_out = preds_test.shape
+
+    input_len  = cfg.H_in * cfg.W_in
+    output_len = cfg.H_out * cfg.W_out
+    stride     = cfg.stride
+
+    test_idx = np.asarray(test_idx)
+
+    # 2) Reconstruct full normalized series in raw index space
+    max_g = int(test_idx.max())
+    total_raw_len = max_g * stride + input_len + output_len
+
+    pred_sum = np.zeros(total_raw_len, dtype=np.float64)
+    gt_sum   = np.zeros(total_raw_len, dtype=np.float64)
+    count    = np.zeros(total_raw_len, dtype=np.int32)
+
+    for i in range(N_test):
+        g = int(test_idx[i])
+        out_start = g * stride + input_len
+        out_end   = out_start + output_len
+
+        pred_flat = preds_test[i, 0].reshape(-1)  # (output_len,)
+        gt_flat   = gts_test[i, 0].reshape(-1)
+
+        pred_sum[out_start:out_end] += pred_flat
+        gt_sum[out_start:out_end]   += gt_flat
+        count[out_start:out_end]    += 1
+
+    mask = count > 0
+    if not np.any(mask):
+        print("[TEST_WINDOWS_ORIG] No forecast positions to visualize in TEST region.")
+        return
+
+    # compress to contiguous predicted region (index 0..L-1)
+    pred_full_norm = np.zeros_like(pred_sum)
+    gt_full_norm   = np.zeros_like(gt_sum)
+    pred_full_norm[mask] = pred_sum[mask] / count[mask]
+    gt_full_norm[mask]   = gt_sum[mask]   / count[mask]
+
+    # compressed sequences (only where predictions exist)
+    compressed_pred_norm = pred_full_norm[mask]  # shape (L,)
+    compressed_gt_norm   = gt_full_norm[mask]    # shape (L,)
+
+    # 3) Inverse-transform to ORIGINAL scale on compressed series
+    compressed_pred_orig = scaler.inverse_transform(
+        compressed_pred_norm.reshape(-1, 1)
+    ).flatten()
+    compressed_gt_orig = scaler.inverse_transform(
+        compressed_gt_norm.reshape(-1, 1)
+    ).flatten()
+
+    L = compressed_pred_orig.shape[0]
+
+    # 4) Non-overlap prediction horizon and window size
+    horizon_len_samples = (cfg.H_out - cfg.overlap_rows) * cfg.W_out
+    window_len_samples  = horizon_len_samples * seq_len
+
+    if window_len_samples > L:
+        print(
+            f"[TEST_WINDOWS_ORIG] Not enough predicted length (L={L}) for window_len={window_len_samples}."
+        )
+        return
+
+    window_seconds = window_len_samples * cfg.sample_interval_sec
+    window_minutes = window_seconds / 60.0
+
+    print(
+        f"[TEST_WINDOWS_ORIG] horizon_len={horizon_len_samples} samples, "
+        f"seq_len={seq_len} -> window_len={window_len_samples} samples "
+        f"= {window_seconds:.0f} sec = {window_minutes:.1f} min"
+    )
+
+    # 5) Choose start positions in compressed index space [0..L-window_len]
+    max_start = L - window_len_samples
+    num_windows = min(num_windows, max_start + 1)
+    starts = np.linspace(0, max_start, num_windows, dtype=int)
+
+    # fixed y-axis [0, max]
+    ymax = max(compressed_gt_orig.max(), compressed_pred_orig.max())
+
+    # 6) Plot each window
+    for j, start_idx in enumerate(starts):
+        end_idx = start_idx + window_len_samples
+
+        gt_seg   = compressed_gt_orig[start_idx:end_idx]
+        pred_seg = compressed_pred_orig[start_idx:end_idx]
+
+        # x-axis in seconds from 0
+        time_axis_sec = np.arange(window_len_samples) * cfg.sample_interval_sec
+
+        plt.figure(figsize=(10, 4))
+        plt.plot(time_axis_sec, gt_seg, label="Ground Truth", linewidth=2)
+        plt.plot(
+            time_axis_sec,
+            pred_seg,
+            label="Predictions",
+            linestyle="--",
+            linewidth=1.5,
+            alpha=0.8,
+        )
+
+        plt.xlabel("Time within window (seconds, starting at 0)")
+        plt.ylabel("Traffic volume (original)")
+        plt.title(
+            f"TEST prediction window #{j} "
+            f"– duration={window_seconds:.0f}s ({window_minutes:.1f} min)"
+        )
+        plt.grid(True)
+        plt.legend()
+        plt.ylim(0, ymax * 1.05)
+        plt.tight_layout()
+
+        fname = (
+            f"test_window_orig_{j}_len{window_len_samples}_{cfg.image_tag}.png"
+        )
+        out_path = os.path.join(cfg.visualized_dir, fname)
+        plt.savefig(out_path, dpi=150)
+        plt.show()
+        plt.close()
+
+        print(f"[TEST_WINDOWS_ORIG] Saved window #{j} to {out_path}")
+
+
+
+def visualize_test_windows_sec_normalized(
+    model,
+    test_loader,
+    test_idx,
+    device,
+    seq_len: int = 5,
+    num_windows: int = 3,
+):
+    """
+    Visualize several TEST prediction windows (GT vs Pred) in NORMALIZED scale.
+    - x-axis: seconds starting at 0
+    - window length: (non-overlap horizon) * seq_len
+    - y-axis: [0, 1]
+    """
+    os.makedirs(cfg.visualized_dir, exist_ok=True)
+
+    # 1) Inference on TEST (normalized)
+    preds_test, gts_test = _run_inference(model, test_loader, device)
+    N_test, C, H_out, W_out = preds_test.shape
+
+    input_len  = cfg.H_in * cfg.W_in
+    output_len = cfg.H_out * cfg.W_out
+    stride     = cfg.stride
+
+    test_idx = np.asarray(test_idx)
+
+    # 2) Reconstruct full normalized series (raw index space)
+    max_g = int(test_idx.max())
+    total_raw_len = max_g * stride + input_len + output_len
+
+    pred_sum = np.zeros(total_raw_len, dtype=np.float64)
+    gt_sum   = np.zeros(total_raw_len, dtype=np.float64)
+    count    = np.zeros(total_raw_len, dtype=np.int32)
+
+    for i in range(N_test):
+        g = int(test_idx[i])
+        out_start = g * stride + input_len
+        out_end   = out_start + output_len
+
+        pred_flat = preds_test[i, 0].reshape(-1)
+        gt_flat   = gts_test[i, 0].reshape(-1)
+
+        pred_sum[out_start:out_end] += pred_flat
+        gt_sum[out_start:out_end]   += gt_flat
+        count[out_start:out_end]    += 1
+
+    mask = count > 0
+    if not np.any(mask):
+        print("[TEST_WINDOWS_NORM] No forecast positions to visualize in TEST region.")
+        return
+
+    pred_full_norm = np.zeros_like(pred_sum)
+    gt_full_norm   = np.zeros_like(gt_sum)
+    pred_full_norm[mask] = pred_sum[mask] / count[mask]
+    gt_full_norm[mask]   = gt_sum[mask]   / count[mask]
+
+    # compressed sequences
+    compressed_pred_norm = pred_full_norm[mask]
+    compressed_gt_norm   = gt_full_norm[mask]
+    L = compressed_pred_norm.shape[0]
+
+    # 3) Non-overlap horizon + window length
+    horizon_len_samples = (cfg.H_out - cfg.overlap_rows) * cfg.W_out
+    window_len_samples  = horizon_len_samples * seq_len
+
+    if window_len_samples > L:
+        print(
+            f"[TEST_WINDOWS_NORM] Not enough predicted length (L={L}) for window_len={window_len_samples}."
+        )
+        return
+
+    window_seconds = window_len_samples * cfg.sample_interval_sec
+    window_minutes = window_seconds / 60.0
+
+    print(
+        f"[TEST_WINDOWS_NORM] horizon_len={horizon_len_samples} samples, "
+        f"seq_len={seq_len} -> window_len={window_len_samples} samples "
+        f"= {window_seconds:.0f} sec = {window_minutes:.1f} min"
+    )
+
+    max_start = L - window_len_samples
+    num_windows = min(num_windows, max_start + 1)
+    starts = np.linspace(0, max_start, num_windows, dtype=int)
+
+    # 4) Plot windows (normalized, y in [0, 1])
+    for j, start_idx in enumerate(starts):
+        end_idx = start_idx + window_len_samples
+
+        gt_seg   = compressed_gt_norm[start_idx:end_idx]
+        pred_seg = compressed_pred_norm[start_idx:end_idx]
+
+        time_axis_sec = np.arange(window_len_samples) * cfg.sample_interval_sec
+
+        plt.figure(figsize=(10, 4))
+        plt.plot(time_axis_sec, gt_seg, label="Ground Truth (norm)", linewidth=2)
+        plt.plot(
+            time_axis_sec,
+            pred_seg,
+            label="Predictions (norm)",
+            linestyle="--",
+            linewidth=1.5,
+            alpha=0.8,
+        )
+
+        plt.xlabel("Time within window (seconds, starting at 0)")
+        plt.ylabel("Normalized traffic")
+        plt.title(
+            f"TEST prediction window #{j} (normalized) "
+            f"– duration={window_seconds:.0f}s ({window_minutes:.1f} min)"
+        )
+        plt.grid(True)
+        plt.legend()
+        plt.ylim(0, 1)   # fixed [0,1]
+        plt.tight_layout()
+
+        fname = (
+            f"test_window_norm_{j}_len{window_len_samples}_{cfg.image_tag}.png"
+        )
+        out_path = os.path.join(cfg.visualized_dir, fname)
+        plt.savefig(out_path, dpi=150)
+        plt.show()
+        plt.close()
+
+        print(f"[TEST_WINDOWS_NORM] Saved window #{j} to {out_path}")
+
+
+
+
+
+# def visualize_test_windows_sec(
+#     model,
+#     test_loader,
+#     test_idx,
+#     device,
+#     scaler,
+#     seq_len: int = 5,
+#     num_windows: int = 3,
+# ):
+#     """
+#     Visualize several TEST prediction windows (GT vs Pred) in ORIGINAL scale.
+#
+#     - x-axis is *relative* time in seconds, starting from 0 for each window.
+#     - The true prediction horizon is the NON-OVERLAPPED part:
+#
+#           horizon_len_samples = (H_out - overlap_rows) * W_out
+#
+#       So in seconds:
+#
+#           horizon_seconds = horizon_len_samples * cfg.sample_interval_sec
+#
+#     - The visualization window length is:
+#
+#           window_len_samples = horizon_len_samples * seq_len
+#
+#       (i.e., 'seq_len' horizons concatenated),
+#       so in seconds:
+#
+#           window_seconds = window_len_samples * cfg.sample_interval_sec
+#
+#       Example:
+#         - if prediction horizon = 12 min and seq_len = 5 → 60 min window
+#         - if prediction horizon = 24 min and seq_len = 5 → 120 min window
+#     """
+#     os.makedirs(cfg.visualized_dir, exist_ok=True)
+#
+#     # 1) Run inference on TEST (normalized)
+#     preds_test, gts_test = _run_inference(model, test_loader, device)
+#     N_test, C, H_out, W_out = preds_test.shape
+#
+#     input_len  = cfg.H_in * cfg.W_in
+#     output_len = cfg.H_out * cfg.W_out      # total horizon image (including overlap)
+#     stride     = cfg.stride
+#
+#     test_idx = np.asarray(test_idx)
+#     if len(test_idx) != N_test:
+#         print(
+#             f"[TEST_WINDOWS] [WARN] len(test_idx)={len(test_idx)} != N_test={N_test}; "
+#             f"test window reconstruction may be inconsistent."
+#         )
+#
+#     # 2) Reconstruct full 1D series (normalized) over TEST forecast region
+#     max_g = int(test_idx.max())
+#     total_raw_len = max_g * stride + input_len + output_len
+#
+#     pred_sum = np.zeros(total_raw_len, dtype=np.float64)
+#     gt_sum   = np.zeros(total_raw_len, dtype=np.float64)
+#     count    = np.zeros(total_raw_len, dtype=np.int32)
+#
+#     for i in range(N_test):
+#         g = int(test_idx[i])
+#         out_start = g * stride + input_len
+#         out_end   = out_start + output_len
+#
+#         pred_flat_norm = preds_test[i, 0].reshape(-1)  # (output_len,)
+#         gt_flat_norm   = gts_test[i, 0].reshape(-1)
+#
+#         pred_sum[out_start:out_end] += pred_flat_norm
+#         gt_sum[out_start:out_end]   += gt_flat_norm
+#         count[out_start:out_end]    += 1
+#
+#     mask = count > 0
+#     if not np.any(mask):
+#         print("[TEST_WINDOWS] No forecast positions to visualize in TEST region.")
+#         return
+#
+#     pred_full_norm = np.zeros_like(pred_sum)
+#     gt_full_norm   = np.zeros_like(gt_sum)
+#     pred_full_norm[mask] = pred_sum[mask] / count[mask]
+#     gt_full_norm[mask]   = gt_sum[mask]   / count[mask]
+#
+#     # 3) Inverse transform to ORIGINAL scale (only values; time stays implicit)
+#     gt_full_orig   = scaler.inverse_transform(gt_full_norm.reshape(-1, 1)).flatten()
+#     pred_full_orig = scaler.inverse_transform(pred_full_norm.reshape(-1, 1)).flatten()
+#
+#     # 4) Define prediction horizon (non-overlapped) and window length
+#     horizon_len_samples = (cfg.H_out - cfg.overlap_rows) * cfg.W_out
+#     horizon_seconds     = horizon_len_samples * cfg.sample_interval_sec
+#
+#     window_len_samples = horizon_len_samples * seq_len
+#     window_seconds     = window_len_samples * cfg.sample_interval_sec
+#     window_minutes     = window_seconds / 60.0
+#
+#     print(
+#         f"[TEST_WINDOWS] horizon_len={horizon_len_samples} samples "
+#         f"({horizon_seconds:.0f} sec), seq_len={seq_len} -> "
+#         f"window_len={window_len_samples} samples "
+#         f"= {window_seconds:.0f} sec = {window_minutes:.1f} min"
+#     )
+#
+#     # Valid region where we actually have predictions
+#     valid_indices = np.where(mask)[0]
+#     first_valid   = int(valid_indices.min())
+#     last_valid    = int(valid_indices.max())
+#
+#     max_start = last_valid - window_len_samples + 1
+#     if max_start <= first_valid:
+#         print(
+#             "[TEST_WINDOWS] Not enough predicted span for the requested window size; "
+#             "try reducing seq_len or using a shorter horizon."
+#         )
+#         return
+#
+#     # 5) Choose start positions for windows (evenly spaced inside valid forecast region)
+#     num_windows = min(num_windows, max_start - first_valid + 1)
+#     if num_windows <= 0:
+#         print("[TEST_WINDOWS] No valid windows to visualize.")
+#         return
+#
+#     starts = np.linspace(first_valid, max_start, num_windows, dtype=int)
+#
+#     # 6) Plot each selected window (GT vs Pred) with x-axis starting from 0
+#     for j, start_idx in enumerate(starts):
+#         end_idx = start_idx + window_len_samples
+#
+#         gt_seg   = gt_full_orig[start_idx:end_idx]
+#         pred_seg = pred_full_orig[start_idx:end_idx]
+#
+#         # x-axis: relative time within the window, starting from 0
+#         time_axis_sec = np.arange(window_len_samples) * cfg.sample_interval_sec
+#
+#         plt.figure(figsize=(10, 4))
+#         plt.plot(time_axis_sec, gt_seg, label="Ground Truth", linewidth=2)
+#         plt.plot(
+#             time_axis_sec,
+#             pred_seg,
+#             label="Predictions",
+#             linestyle="--",
+#             linewidth=1.5,
+#             alpha=0.8,
+#         )
+#
+#         plt.xlabel("Time within window (seconds)")
+#         plt.ylabel("Traffic volume (original scale)")
+#         plt.title(
+#             f"TEST prediction window #{j} "
+#             f"– duration={window_seconds:.0f}s ({window_minutes:.1f} min)\n"
+#             f"horizon_len={horizon_len_samples} samples, seq_len={seq_len}"
+#         )
+#         plt.grid(True)
+#         plt.legend()
+#         plt.tight_layout()
+#
+#         fname = (
+#             f"test_window{j}_start{start_idx}_len{window_len_samples}_"
+#             f"horizon{horizon_len_samples}_seq{seq_len}_{cfg.image_tag}.png"
+#         )
+#         out_path = os.path.join(cfg.visualized_dir, fname)
+#         plt.savefig(out_path, dpi=150)
+#         plt.show()
+#         plt.close()
+#
+#         print(f"[TEST_WINDOWS] Saved window #{j} visualization to {out_path}")
+
+
 
 # =========================================================
 # 3) TRAFFIC OVER WHOLE DATASET (TRAIN + VAL + TEST)
 # =========================================================
+
 def visualize_full_dataset_traffic(
     model,
     train_loader,
@@ -648,7 +1014,6 @@ def visualize_full_dataset_traffic(
     plt.close()
 
     print(f"Saved full dataset traffic visualization to {out_path}")
-
 
 
 def visualize_full_dataset_traffic_normalized(
