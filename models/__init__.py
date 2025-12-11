@@ -18,3 +18,7 @@ from .builders import (
     build_unet_from_cfg,
     build_model_from_cfg,
 )
+
+
+from .coregan_pytorch import CoreGANGenerator, CoreGANDiscriminator
+

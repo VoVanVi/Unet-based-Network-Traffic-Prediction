@@ -11,6 +11,131 @@ from torch.utils.data import Dataset, DataLoader
 
 from config import cfg
 from utils.image_transform import build_image_pairs
+import matplotlib.pyplot as plt
+
+
+def visualize_dataset_samples(
+    split: str = "train",
+    num_samples: int = 3,
+):
+    """
+    Visualize how the constructed input/output images look after preprocessing.
+
+    - split: "train", "val", or "test"
+    - num_samples: how many (X, Y) pairs to show
+
+    For each sample, we show:
+        Left  : Input image  (X)
+        Right : Target image (Y)
+    """
+    # Make sure dataset file exists
+    dataset_path = _get_dataset_path()
+    if not os.path.exists(dataset_path):
+        raise FileNotFoundError(
+            f"Dataset file not found at {dataset_path}. "
+            "Run generate_and_save_dataset() first."
+        )
+
+    # Load arrays
+    (
+        X_train, Y_train,
+        X_val,   Y_val,
+        X_test,  Y_test,
+        train_idx, val_idx, test_idx
+    ) = _load_dataset_arrays()
+
+    split = split.lower()
+    if split == "train":
+        X = X_train
+        Y = Y_train
+    elif split == "val":
+        X = X_val
+        Y = Y_val
+    elif split == "test":
+        X = X_test
+        Y = Y_test
+    else:
+        raise ValueError(f"Unknown split: {split} (use 'train', 'val', or 'test')")
+
+    N = X.shape[0]
+    if N == 0:
+        print(f"[visualize_dataset_samples] No samples in {split} split.")
+        return
+
+    num_samples = min(num_samples, N)
+
+    print(f"[visualize_dataset_samples] Split={split}, total samples={N}")
+    print(f"Showing first {num_samples} (X, Y) pairs.")
+
+    for i in range(num_samples):
+        x_i = X[i]
+        y_i = Y[i]
+
+        # ---- Handle shapes ----
+        # X / Y can be:
+        #   - (H, W)           -> gray
+        #   - (C, H, W), C=1   -> gray
+        #   - (C, H, W), C=3   -> RGB
+        def to_img(arr):
+            arr = np.asarray(arr)
+
+            # If this is a sequence (K, C, H, W), pick one frame to display
+            # (here we choose the last context frame)
+            if arr.ndim == 4:
+                # assume (K, C, H, W)
+                arr = arr[-1]  # -> (C, H, W)
+
+            if arr.ndim == 2:
+                # (H, W)
+                return arr, "gray"
+
+            elif arr.ndim == 3:
+                C, H, W = arr.shape
+                if C == 1:
+                    # (1, H, W) -> (H, W)
+                    return arr[0], "gray"
+                elif C == 3:
+                    # (3, H, W) -> (H, W, 3)
+                    return np.transpose(arr, (1, 2, 0)), None
+                else:
+                    # unexpected channels, just show first channel
+                    return arr[0], "gray"
+
+            else:
+                raise ValueError(f"Unexpected array shape for image: {arr.shape}")
+
+        x_img, x_cmap = to_img(x_i)
+        y_img, y_cmap = to_img(y_i)
+
+        # ---- Plot ----
+        fig, axes = plt.subplots(1, 2, figsize=(6, 3))
+        fig.suptitle(
+            f"{split.upper()} sample #{i}\n"
+            f"X shape: {x_i.shape}, Y shape: {y_i.shape}",
+            fontsize=9,
+        )
+
+        ax1, ax2 = axes
+
+        if x_cmap is not None:
+            im1 = ax1.imshow(x_img, aspect="auto", cmap=x_cmap)
+        else:
+            im1 = ax1.imshow(x_img, aspect="auto")
+        ax1.set_title("Input X")
+        ax1.axis("off")
+        fig.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
+
+        if y_cmap is not None:
+            im2 = ax2.imshow(y_img, aspect="auto", cmap=y_cmap)
+        else:
+            im2 = ax2.imshow(y_img, aspect="auto")
+        ax2.set_title("Target Y")
+        ax2.axis("off")
+        fig.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
+
+        plt.tight_layout()
+        plt.show()
+        plt.close(fig)
 
 
 # --------------------------
@@ -19,7 +144,7 @@ from utils.image_transform import build_image_pairs
 
 def _get_dataset_path():
     os.makedirs(cfg.processed_dir, exist_ok=True)
-    fname = f"dataset_{cfg.image_mode}_{cfg.image_tag}.npz"
+    fname = f"dataset_{cfg.model_type}_{cfg.image_mode}_{cfg.image_tag}.npz"
     return os.path.join(cfg.processed_dir, fname)
 
 
@@ -171,6 +296,16 @@ def generate_and_save_dataset():
     """
     Load raw CSV, normalize, construct images, split into
     train/val/test, and save to .npz + scaler to disk.
+
+    IMPORTANT:
+      - For model_type in {"unet", "tcn"}: we save single windows X, Y:
+          X_*: (N, C, H_in, W_in)
+          Y_*: (N, H_out, W_out) or (N, C_out, H_out, W_out)
+
+      - For model_type in {"cnn_gru", "cnn_lstm", "coregan"}:
+          we save SEQUENCES X_seq, Y_seq:
+          X_*: (N_seq, K, C, H_in, W_in)
+          Y_*: (N_seq, H_out, W_out) or (N_seq, C_out, H_out, W_out)
     """
     dataset_path = _get_dataset_path()
     print(f"[dataset] Generating dataset and saving to {dataset_path}")
@@ -226,28 +361,81 @@ def generate_and_save_dataset():
     N_seq = X_seq.shape[0]
     print(f"[dataset] Total sequence samples: {N_seq} (context K={K})")
 
-    # Window indices (0 .. N-1); used for time reconstruction later
-    window_ids = np.arange(N)
+    # Decide based on model_type
+    model_type = cfg.model_type.lower()
 
-    # Train/val/test split (by window id)
     rng = np.random.RandomState(cfg.random_seed)
-    perm = rng.permutation(N)
 
-    test_size = int(N * cfg.test_ratio)
-    val_size = int(N * cfg.val_ratio)
+    if model_type in ["cnn_gru", "cnn_lstm", "coregan"]:
+        # ---- SEQUENCE-BASED SPLIT ----
+        seq_ids = np.arange(N_seq)
 
-    test_ids = perm[:test_size]
-    val_ids = perm[test_size:test_size + val_size]
-    train_ids = perm[test_size + val_size:]
+        test_size = int(N_seq * cfg.test_ratio)
+        val_size = int(N_seq * cfg.val_ratio)
+        train_size = N_seq - test_size - val_size
 
-    X_train, Y_train = X[train_ids], Y[train_ids]
-    X_val, Y_val = X[val_ids], Y[val_ids]
-    X_test, Y_test = X[test_ids], Y[test_ids]
+        # here we do a random split; if you prefer chronological, remove permutation
+        perm = rng.permutation(N_seq)
+        test_seq_ids = perm[:test_size]
+        val_seq_ids = perm[test_size:test_size + val_size]
+        train_seq_ids = perm[test_size + val_size:]
 
-    # For reconstruction, we keep the original window index for each split
-    train_idx = train_ids
-    val_idx = val_ids
-    test_idx = test_ids
+        X_train, Y_train = X_seq[train_seq_ids], Y_seq[train_seq_ids]
+        X_val, Y_val = X_seq[val_seq_ids], Y_seq[val_seq_ids]
+        X_test, Y_test = X_seq[test_seq_ids], Y_seq[test_seq_ids]
+
+        # original window indices corresponding to each sequence's target horizon
+        train_idx = orig_idx[train_seq_ids]
+        val_idx = orig_idx[val_seq_ids]
+        test_idx = orig_idx[test_seq_ids]
+
+        print(f"[dataset] Using SEQUENCES for model_type={model_type}")
+        print(f"  X_train: {X_train.shape}, Y_train: {Y_train.shape}")
+    else:
+        # ---- SINGLE-WINDOW SPLIT (UNet, TCN, etc.) ----
+        window_ids = np.arange(N)
+        perm = rng.permutation(N)
+
+        test_size = int(N * cfg.test_ratio)
+        val_size = int(N * cfg.val_ratio)
+
+        test_ids = perm[:test_size]
+        val_ids = perm[test_size:test_size + val_size]
+        train_ids = perm[test_size + val_size:]
+
+        X_train, Y_train = X[train_ids], Y[train_ids]
+        X_val, Y_val = X[val_ids], Y[val_ids]
+        X_test, Y_test = X[test_ids], Y[test_ids]
+
+        train_idx = train_ids
+        val_idx = val_ids
+        test_idx = test_ids
+
+        print(f"[dataset] Using SINGLE WINDOWS for model_type={model_type}")
+        print(f"  X_train: {X_train.shape}, Y_train: {Y_train.shape}")
+
+    # # Window indices (0 .. N-1); used for time reconstruction later
+    # window_ids = np.arange(N)
+    #
+    # # Train/val/test split (by window id)
+    # rng = np.random.RandomState(cfg.random_seed)
+    # perm = rng.permutation(N)
+    #
+    # test_size = int(N * cfg.test_ratio)
+    # val_size = int(N * cfg.val_ratio)
+    #
+    # test_ids = perm[:test_size]
+    # val_ids = perm[test_size:test_size + val_size]
+    # train_ids = perm[test_size + val_size:]
+    #
+    # X_train, Y_train = X[train_ids], Y[train_ids]
+    # X_val, Y_val = X[val_ids], Y[val_ids]
+    # X_test, Y_test = X[test_ids], Y[test_ids]
+    #
+    # # For reconstruction, we keep the original window index for each split
+    # train_idx = train_ids
+    # val_idx = val_ids
+    # test_idx = test_ids
 
     # Chronological split based on sequence index (0..N_seq-1)
     # seq_ids = np.arange(N_seq)
@@ -385,10 +573,39 @@ def prepare_dataloaders():
     )
 
 
+# -------------------------------------
+# Helper for CoreGAN / Keras models
+# -------------------------------------
+def load_numpy_for_coregan():
+    """
+    Load X_train, Y_train, X_val, Y_val, X_test, Y_test from the .npz
+    WITHOUT wrapping into PyTorch Datasets.
+
+    This is useful for non-PyTorch models like CoreGAN.
+    """
+    dataset_path = _get_dataset_path()
+    if not os.path.exists(dataset_path):
+        # generate once if missing
+        generate_and_save_dataset()
+
+    data = np.load(dataset_path, allow_pickle=False)
+    X_train = data["X_train"]   # (N_train, C, H_in, W_in) or (N_train, H_in, W_in)
+    Y_train = data["Y_train"]   # (N_train, H_out, W_out) or (N_train, C_out, H_out, W_out)
+    X_val   = data["X_val"]
+    Y_val   = data["Y_val"]
+    X_test  = data["X_test"]
+    Y_test  = data["Y_test"]
+
+    return X_train, Y_train, X_val, Y_val, X_test, Y_test
+
+
 # dataset.py (optional debug main)
 
 if __name__ == "__main__":
-    print("[dataset] Forcing dataset regeneration...")
-    generate_and_save_dataset()
-    print("[dataset] Done. File saved at:")
-    print(_get_dataset_path())
+    print("[dataset] Using existing dataset (or generating if missing)...")
+    if not os.path.exists(_get_dataset_path()):
+        generate_and_save_dataset()
+
+    # 🔍 Visualize a few samples from the training split
+    visualize_dataset_samples(split="train", num_samples=3)
+

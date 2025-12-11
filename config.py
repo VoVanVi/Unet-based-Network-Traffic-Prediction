@@ -9,14 +9,14 @@ class Config:
     value_col = "All packets"
 
     # ---------- Image / sequence settings ----------
-    H_in = 15
+    H_in = 63
     W_in = 24
     H_out = 15
     W_out = 24
 
     context_len = 5  # or 5, etc. Number of past windows for CNN-GRU
 
-    overlap_rows = 12          # 24 rows overlapped -> 24*24 = 576 steps
+    overlap_rows = 3          # 24 rows overlapped -> 24*24 = 576 steps
     stride = 1                 # 10 sec shift per image
 
     image_mode = "gray2d"      # or "rgb2d" or "spectrogram"
@@ -36,7 +36,7 @@ class Config:
     random_seed = 42
 
     # ---------- Model ----------
-    model_type = "cnn_gru"  # or "cnn_gru", "cnn_lstm", "tcn", "unet"
+    model_type = "unet"  # or "cnn_gru", "cnn_lstm", "tcn", "unet", "coregan"
     in_channels = 1  # 1 for gray2d/spectrogram, 3 for rgb2d
     out_channels = 1
     cnn_feature_dim = 256
@@ -50,9 +50,9 @@ class Config:
     unet_features = (32, 64, 128, 256)
 
     # ---------- Training ----------
-    batch_size = 32
-    num_epochs = 30
-    lr = 1e-3
+    batch_size = 16
+    num_epochs = 100
+    lr = 1e-4
 
     # ---------- Device ----------
     device = "cuda" # "cuda" or "cpu"
@@ -82,5 +82,4 @@ cfg.image_tag = (
 # Use the tag in all important artifact filenames
 os.makedirs(cfg.checkpoint_dir, exist_ok=True)
 cfg.model_ckpt = os.path.join(cfg.checkpoint_dir, f"{cfg.model_type}_best_{cfg.image_tag}.pt")
-
 cfg.scaler_path = os.path.join(cfg.checkpoint_dir, f"scaler_{cfg.model_type}_{cfg.image_tag}.pkl")

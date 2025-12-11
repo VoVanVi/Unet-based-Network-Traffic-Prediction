@@ -156,10 +156,10 @@ def main():
         seq_len=5, num_windows=5
     )
 
-    visualize_test_windows_sec_normalized(
-        model, test_loader, test_idx, device,
-        seq_len=5, num_windows=5
-    )
+    # visualize_test_windows_sec_normalized(
+    #     model, test_loader, test_idx, device,
+    #     seq_len=5, num_windows=5
+    # )
     # visualize_test_windows_sec(
     #     model,
     #     test_loader=test_loader,
@@ -172,7 +172,7 @@ def main():
 
     print("\nVisualizing traffic of the whole dataset (normalized or original)...")
     # visualize_all_test_traffic_normalized(model, test_loader, test_idx, device)
-    visualize_all_test_traffic(model, test_loader, test_idx, device, scaler)
+    # visualize_all_test_traffic(model, test_loader, test_idx, device, scaler)
 
     # print("\nVisualizing traffic over WHOLE dataset (normalized)...")
     # visualize_full_dataset_traffic(model, train_eval_loader, val_eval_loader, test_loader, train_idx, val_idx, test_idx, device, scaler)

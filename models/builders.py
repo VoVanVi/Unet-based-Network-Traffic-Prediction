@@ -15,6 +15,8 @@ from .cells import (
     UNet,
 )
 
+from .coregan_pytorch import CoreGANGenerator
+
 
 # =========================================================
 # 1) Individual builders
@@ -118,5 +120,13 @@ def build_model_from_cfg(cfg) -> nn.Module:
         return build_cnn_lstm_forecaster_from_cfg(cfg)
     elif model_type == "tcn":
         return build_tcn_forecaster_from_cfg(cfg)
+    elif cfg.model_type == "coregan":
+        # Use ConvLSTM generator as a pure forecaster
+        return CoreGANGenerator(
+            time_steps=cfg.context_len,  # e.g., 5
+            in_channels=cfg.in_channels,  # 1 for gray2d
+            H=cfg.H_in,
+            W=cfg.W_in,
+        )
     else:
         raise ValueError(f"Unknown cfg.model_type: {cfg.model_type}")
