@@ -9,7 +9,7 @@ class Config:
     value_col = "All packets"
 
     # ---------- Image / sequence settings ----------
-    H_in = 63
+    H_in = 15
     W_in = 24
     H_out = 15
     W_out = 24
@@ -36,7 +36,7 @@ class Config:
     random_seed = 42
 
     # ---------- Model ----------
-    model_type = "unet"  # or "cnn_gru", "cnn_lstm", "tcn", "unet", "coregan"
+    model_type = "coregan"  # or "cnn_gru", "cnn_lstm", "tcn", "unet", "coregan"
     in_channels = 1  # 1 for gray2d/spectrogram, 3 for rgb2d
     out_channels = 1
     cnn_feature_dim = 256
@@ -50,12 +50,23 @@ class Config:
     unet_features = (32, 64, 128, 256)
 
     # ---------- Training ----------
-    batch_size = 16
-    num_epochs = 100
+    batch_size = 128
+    num_epochs = 200
     lr = 1e-4
 
+    # ---------- CoreGAN-specific Training ----------
+    gan_fact_matching_cnt = 1  # "fact/fact" matching count (same idea as Keras code)
+    gan_lambda_img = 1.0  # weight for image MSE
+    gan_lambda_adv = 0.0  # weight for adversarial loss
+    gan_lambda_fm = 1.0  # weight for feature-matching loss
+
     # ---------- Device ----------
-    device = "cuda" # "cuda" or "cpu"
+    device = "cuda:0" # "cuda" or "cpu"
+
+    # ---------- Early stopping ----------
+    early_stop = True  # turn on/off early stopping
+    early_stop_patience = 15  # number of epochs without improvement
+    early_stop_min_delta = 0.0  # minimum improvement in val_loss to count
 
     # ---------- Directories ----------
     checkpoint_dir = "checkpoints"
@@ -83,3 +94,6 @@ cfg.image_tag = (
 os.makedirs(cfg.checkpoint_dir, exist_ok=True)
 cfg.model_ckpt = os.path.join(cfg.checkpoint_dir, f"{cfg.model_type}_best_{cfg.image_tag}.pt")
 cfg.scaler_path = os.path.join(cfg.checkpoint_dir, f"scaler_{cfg.model_type}_{cfg.image_tag}.pkl")
+
+# CoreGAN artifacts share the same base results folder as other models
+cfg.coregan_save_dir = os.path.join(cfg.results_dir, "coregan")

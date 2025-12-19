@@ -19,6 +19,7 @@ from visualize_results import (
     visualize_full_dataset_traffic_normalized,
 )
 from models import build_model_from_cfg
+from models.coregan_pytorch import CoreGANGenerator
 
 def compute_test_metrics(model, loader, device):
     """
@@ -128,9 +129,60 @@ def main():
     #     out_channels=1,
     #     out_size=(cfg.H_out, cfg.W_out),  # enforce 15x24 output
     # ).to(device)
+
     print(f"Loading best model from {cfg.model_ckpt} ...")
     ckpt = torch.load(cfg.model_ckpt, map_location=device)
     model.load_state_dict(ckpt["model_state_dict"])
+
+    """
+    print(f"Loading best model from {cfg.model_ckpt} ...")
+    ckpt = torch.load(cfg.model_ckpt, map_location=device)
+
+    # CoreGAN GAN training saves the generator under "generator_state_dict";
+    # deterministic training uses "model_state_dict". Support both so the same
+    # test script works regardless of the training entry point used. Older
+    # checkpoints may save a bare state_dict (without a wrapper key) or other
+    # common aliases like "state_dict".
+    candidate_keys = [
+        "model_state_dict",
+        "generator_state_dict",
+        "state_dict",
+        "model",
+        "netG_state_dict",
+        "netG",
+    ]
+
+    state_dict = None
+    chosen_key = None
+    for key in candidate_keys:
+        if key in ckpt and isinstance(ckpt[key], dict):
+            state_dict = ckpt[key]
+            chosen_key = key
+            break
+
+    # If the checkpoint itself is a state_dict (from torch.save(model.state_dict())),
+    # load it directly.
+    if state_dict is None and isinstance(ckpt, dict):
+        if ckpt and all(torch.is_tensor(v) for v in ckpt.values()):
+            state_dict = ckpt
+            chosen_key = "<root>"
+
+    if state_dict is None:
+        found_keys = list(ckpt.keys()) if isinstance(ckpt, dict) else type(ckpt).__name__
+        raise KeyError(
+            "Checkpoint missing model parameters. Expected one of "
+            f"{candidate_keys} or a bare state_dict. Found keys: {found_keys}"
+        )
+
+    # Remap legacy CoreGAN checkpoints that used nested convlstm_stack modules.
+    if isinstance(model, CoreGANGenerator):
+        state_dict, converted = CoreGANGenerator.convert_legacy_state_dict(state_dict)
+        if converted:
+            print("Remapped legacy CoreGAN checkpoint keys to current layout.")
+
+    model.load_state_dict(state_dict)
+    print(f"Loaded weights using key: {chosen_key}")
+    """
 
     print("Computing test MAE and MSE (normalized scale)...")
     mae, mse = compute_test_metrics(model, test_loader, device)
