@@ -121,12 +121,12 @@ def build_model_from_cfg(cfg) -> nn.Module:
     elif model_type == "tcn":
         return build_tcn_forecaster_from_cfg(cfg)
     elif cfg.model_type == "coregan":
-        # Use ConvLSTM generator as a pure forecaster
+        # For test/inference we only need the generator, discriminator is used in training.
         return CoreGANGenerator(
-            time_steps=cfg.context_len,  # e.g., 5
-            in_channels=cfg.in_channels,  # 1 for gray2d
-            H=cfg.H_in,
-            W=cfg.W_in,
+            time_steps=cfg.context_len,
+            in_channels=cfg.in_channels,
+            H=cfg.H_out,  # CoreGAN assumes H_in == H_out, W_in == W_out
+            W=cfg.W_out,
         )
     else:
         raise ValueError(f"Unknown cfg.model_type: {cfg.model_type}")
